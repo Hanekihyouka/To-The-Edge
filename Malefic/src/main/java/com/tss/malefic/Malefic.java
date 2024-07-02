@@ -3,11 +3,15 @@ package com.tss.malefic;
 import com.mojang.logging.LogUtils;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.tss.malefic.content.mobeffects.Sticky;
+import com.tss.malefic.content.mobeffects.SwiftFuse;
+import com.tss.malefic.content.mobeffects.Webbed;
 import com.tss.malefic.content.mobs.spawn.EmptyPredicate;
 import com.tss.malefic.content.mobs.spawn.HostileSpawnPredicate;
 import com.tss.malefic.content.mobs.spawn.SlimeSpawnPredicate;
 import com.tss.malefic.handler.EventHandler;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.biome.Biome;
@@ -44,6 +48,7 @@ public class Malefic
     public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create(ForgeRegistries.BLOCKS, MODID);
     // Create a Deferred Register to hold Items which will all be registered under the "examplemod" namespace
     public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MODID);
+    public static final DeferredRegister<MobEffect> MOBEFFECTS = DeferredRegister.create(ForgeRegistries.MOB_EFFECTS, MODID);
     // Create a Deferred Register to hold CreativeModeTabs which will all be registered under the "examplemod" namespace
     //public static final DeferredRegister<CreativeModeTab> CREATIVE_MODE_TABS = DeferredRegister.create(Registries.CREATIVE_MODE_TAB, MODID);
     /*public static final DeferredRegister<Codec<? extends BiomeModifier>> BIOME_MODIFIER_SERIALIZERS =  DeferredRegister.create(ForgeRegistries.Keys.BIOME_MODIFIER_SERIALIZERS, MODID);
@@ -55,13 +60,17 @@ public class Malefic
                     PlacedFeature.CODEC.fieldOf("feature").forGetter(EntitySpawnBiomeModifier::feature)
                     // declare constructor
             ).apply(builder,EntitySpawnBiomeModifier::new)));*/
-
+    public static final RegistryObject<MobEffect> MOBEFFECT_STICKY = MOBEFFECTS.register("sticky", () -> new Sticky());
+    public static final RegistryObject<MobEffect> MOBEFFECT_WEBBED = MOBEFFECTS.register("webbed", () -> new Webbed());
+    //public static final RegistryObject<MobEffect> MOBEFFECT_SWIFTFUSE = MOBEFFECTS.register("swiftfuse", () -> new SwiftFuse());
     public Malefic()
     {
         IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
         EventHandler forgeEventHandler = new EventHandler();
         MinecraftForge.EVENT_BUS.register(forgeEventHandler);
         //modEventBus.register(forgeEventHandler);
+
+
 
         // Register the commonSetup method for modloading
         modEventBus.addListener(this::commonSetup);
@@ -70,6 +79,7 @@ public class Malefic
         BLOCKS.register(modEventBus);
         // Register the Deferred Register to the mod event bus so items get registered
         ITEMS.register(modEventBus);
+        MOBEFFECTS.register(modEventBus);
         // Register the Deferred Register to the mod event bus so tabs get registered
         //CREATIVE_MODE_TABS.register(modEventBus);
         //BIOME_MODIFIER_SERIALIZERS.register(modEventBus);

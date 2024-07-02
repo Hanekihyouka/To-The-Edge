@@ -44,13 +44,7 @@
         "weight": 100
       },
       {
-        "type": "minecraft:elder_guardian",
-        "maxCount": 1,
-        "minCount": 1,
-        "weight": 100
-      },
-      {
-        "type": "minecraft:phantom",
+        "type": "minecraft:wither_skeleton",
         "maxCount": 4,
         "minCount": 1,
         "weight": 100
