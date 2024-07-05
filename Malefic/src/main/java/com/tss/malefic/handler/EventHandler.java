@@ -3,57 +3,58 @@ package com.tss.malefic.handler;
 import com.mojang.logging.LogUtils;
 import com.tss.malefic.Config;
 import com.tss.malefic.Malefic;
-import com.tss.malefic.content.mobeffects.Sticky;
-import com.tss.malefic.content.mobeffects.Webbed;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
-import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.stats.Stats;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.damagesource.CombatRules;
 import net.minecraft.world.damagesource.DamageSource;
-import net.minecraft.world.damagesource.DamageType;
 import net.minecraft.world.damagesource.DamageTypes;
-import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ambient.Bat;
+import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraft.world.entity.monster.*;
 import net.minecraft.world.entity.monster.hoglin.Hoglin;
 import net.minecraft.world.entity.monster.piglin.Piglin;
 import net.minecraft.world.entity.monster.piglin.PiglinBrute;
-import net.minecraft.world.inventory.SmithingMenu;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gameevent.GameEvent;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.common.Tags;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingEvent;
 import net.minecraftforge.event.entity.living.MobSpawnEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class EventHandler {
     /*@SubscribeEvent
@@ -63,11 +64,16 @@ public class EventHandler {
         e.setCanceled(true);
     }*/
     private float timeBuffer=0;
-    private float ticks=0;
+    private float customTick=0;
 
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e){
         if(e.phase.equals(TickEvent.Phase.START)){
+            customTick++;
+            if(customTick>20){
+                customTick=0;
+            }
+
             ServerLevel serverLevel = e.getServer().getLevel(Level.OVERWORLD);
             float dayTime = Math.floorMod(serverLevel.getDayTime(),24000);
             float normalizedTime = 0;
@@ -91,8 +97,8 @@ public class EventHandler {
 
     @SubscribeEvent
     public void entityTick(LivingEvent.LivingTickEvent e){
-        if(!e.getEntity().getCommandSenderWorld().isClientSide()) {
-            LivingEntity m = e.getEntity();
+        LivingEntity m = e.getEntity();
+        if(customTick==0 && !e.getEntity().getCommandSenderWorld().isClientSide()) {
             if(m.hasEffect(MobEffects.NIGHT_VISION)){
                 m.removeEffect(MobEffects.DARKNESS);
                 m.removeEffect(MobEffects.CONFUSION);
@@ -100,8 +106,119 @@ public class EventHandler {
             if(m.hasEffect(MobEffects.BLINDNESS)){
                 m.removeEffect(MobEffects.NIGHT_VISION);
             }
+            if(m.getType().equals(EntityType.PLAYER)&&m.isAlive()){
+                if(m.getCommandSenderWorld().equals(Objects.requireNonNull(m.getCommandSenderWorld().getServer()).getLevel(Level.NETHER))){
+                    if(m.hasEffect(MobEffects.FIRE_RESISTANCE)){
+                        if(m.isOnFire()){
+                            m.getCombatTracker().recordDamage(m.damageSources().onFire(), 1);
+                            m.setHealth(m.getHealth() - 1);
+                            m.gameEvent(GameEvent.ENTITY_DAMAGE);
+                            m.animateHurt(0);
+                            m.getCommandSenderWorld().playSound(null,m.blockPosition(),SoundEvents.PLAYER_HURT_ON_FIRE, SoundSource.PLAYERS );
+                            if(m.getHealth()<=0){m.die(m.damageSources().onFire());}
+
+                        }
+                    } else {
+                        if(!m.isOnFire()){
+                            m.setSecondsOnFire(3);
+                        }
+                        m.getCombatTracker().recordDamage(m.damageSources().onFire(), 5);
+                        m.setHealth(m.getHealth() - 5);
+                        m.gameEvent(GameEvent.ENTITY_DAMAGE);
+                        m.animateHurt(0);
+                        m.getCommandSenderWorld().playSound(null,m.blockPosition(),SoundEvents.PLAYER_HURT_ON_FIRE, SoundSource.PLAYERS );
+                        if(m.getHealth()<=0){m.die(m.damageSources().onFire());}
+                    }
+                }
+            }
+        }
+
+
+        if(m.getType().equals(EntityType.WITHER)){
+            if(!m.getTags().stream().toList().isEmpty()){
+                Player p = m.getCommandSenderWorld().getPlayerByUUID(UUID.fromString(m.getTags().stream().toList().get(0)));
+                if(p!=null) {
+                    if (!m.getCommandSenderWorld().getScoreboard().hasObjective("malefic_withermark")) {
+                        m.getCommandSenderWorld().getScoreboard().addObjective("malefic_withermark", ObjectiveCriteria.DUMMY, Component.literal("WitherMark"), ObjectiveCriteria.RenderType.INTEGER);
+                    }
+                    if (!m.getCommandSenderWorld().getScoreboard().hasObjective("malefic_withermarkLevel")) {
+                        m.getCommandSenderWorld().getScoreboard().addObjective("malefic_withermarkLevel", ObjectiveCriteria.DUMMY, Component.literal("WitherMarkLevel"), ObjectiveCriteria.RenderType.INTEGER);
+                    }
+                    Objective objectiveMarkTick = m.getCommandSenderWorld().getScoreboard().getOrCreateObjective("malefic_withermark");
+                    Objective objectiveMarkLevel = m.getCommandSenderWorld().getScoreboard().getOrCreateObjective("malefic_withermarkLevel");
+
+
+                    m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkTick).add(1);
+                    int markTick = m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkTick).getScore();
+                    int markLevel = Math.max(m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkLevel).getScore(),2)-2;
+                    if(markTick > 120){
+                        m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkTick).setScore(0);
+                        m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkLevel).add(1);
+                        if(markLevel>0) {
+                            float damage = getDamageAfterMagicAbsorb(p,m.damageSources().mobAttack(m),markLevel);
+                            p.getCombatTracker().recordDamage(m.damageSources().wither(), damage);
+                            p.setHealth(p.getHealth() - damage);
+                            p.gameEvent(GameEvent.ENTITY_DAMAGE);
+                            p.animateHurt(0);
+                            p.getCommandSenderWorld().playSound(null, p.blockPosition(), SoundEvents.PLAYER_HURT, SoundSource.PLAYERS);
+                            p.getCommandSenderWorld().playSound(null, m.blockPosition(), SoundEvents.WITHER_AMBIENT, SoundSource.PLAYERS);
+                            p.addEffect(new MobEffectInstance(MobEffects.WITHER, 20, 0));
+                        }
+                    }
+                    if(p.getHealth()<=0||!p.isAlive()){
+                        p.die(p.damageSources().wither());
+                        m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkTick).setScore(0);
+                        m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkLevel).setScore(0);
+                        discardWither(m);
+                    }
+                } else {
+                    discardWither(m);
+
+                }
+            }
+        }
+
+    }
+    @SubscribeEvent
+    public void onWitherSpawn(EntityJoinLevelEvent e){
+        if(!e.getLevel().isClientSide()&&e.getEntity().getType().equals(EntityType.WITHER)){
+            WitherBoss m = (WitherBoss) e.getEntity();
+            Objects.requireNonNull(m.getAttribute(Attributes.MAX_HEALTH)).setBaseValue(3000);
+            m.setHealth(3000);
+            // Mark player
+            Player p = m.getCommandSenderWorld().getNearestPlayer(m,64);
+            if(p!=null){
+                m.addTag(p.getStringUUID());
+                p.getCombatTracker().recordDamage(m.damageSources().wither(), m.getHealth()-2);
+                p.setHealth(1);
+                p.gameEvent(GameEvent.ENTITY_DAMAGE);
+                p.animateHurt(0);
+                p.getCommandSenderWorld().playSound(null,m.blockPosition(),SoundEvents.PLAYER_HURT, SoundSource.PLAYERS);
+                p.getCommandSenderWorld().playSound(null,m.blockPosition(),SoundEvents.WITHER_AMBIENT, SoundSource.PLAYERS);
+                p.addEffect(new MobEffectInstance(MobEffects.WITHER,20, 0));
+
+                Objective objectiveMarkTick = m.getCommandSenderWorld().getScoreboard().getOrCreateObjective("malefic_withermark");
+                Objective objectiveMarkLevel = m.getCommandSenderWorld().getScoreboard().getOrCreateObjective("malefic_withermarkLevel");
+                m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkTick).setScore(0);
+                m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkLevel).setScore(0);
+            } else{
+                discardWither(m);
+
+            }
         }
     }
+
+    protected void discardWither(LivingEntity m){
+        BlockPos blockPos = m.blockPosition();
+        Level level = m.getCommandSenderWorld();
+        m.remove(Entity.RemovalReason.DISCARDED);
+        level.setBlock(blockPos, Blocks.WITHER_SKELETON_SKULL.defaultBlockState(),0);
+        level.setBlock(blockPos.east(), Blocks.WITHER_SKELETON_SKULL.defaultBlockState(),0);
+        level.setBlock(blockPos.west(), Blocks.WITHER_SKELETON_SKULL.defaultBlockState(),0);
+
+    }
+
+
 
     @SubscribeEvent
     public void entityDamageEvent(LivingDamageEvent e){
@@ -134,6 +251,27 @@ public class EventHandler {
                 damage = Math.max(damage, 1);
             }
 
+            //凋灵BOSS基岩减伤
+            if (m.getType().equals(EntityType.WITHER)){
+                boolean inBedrock = false;
+                BlockPos baseBlockPos = m.blockPosition();
+                BlockPos[] blockPosList = new BlockPos[]{
+                        baseBlockPos,baseBlockPos.east(),baseBlockPos.west(),baseBlockPos.south(),baseBlockPos.north(),
+                        baseBlockPos.above(),baseBlockPos.above().east(),baseBlockPos.above().west(),baseBlockPos.above().south(),baseBlockPos.above().north(),
+                        baseBlockPos.above(2),baseBlockPos.above(2).east(),baseBlockPos.above(2).west(),baseBlockPos.above(2).south(),baseBlockPos.above(2).north()
+                };
+                for(BlockPos blockPos : blockPosList){
+                    if(m.getCommandSenderWorld().getBlockState(blockPos).is(Blocks.BEDROCK)){
+                        inBedrock = true;
+                        break;
+                    }
+                }
+                if(inBedrock){
+                    damage *= 0.2f;
+                }
+            }
+
+
             e.setAmount(damage);
         }
 
@@ -149,20 +287,10 @@ public class EventHandler {
 
 
             if(m.invulnerableTime > 0 && !isFrameDamage(ds)) {
-                if (m.getType().equals(EntityType.IRON_GOLEM)||m.getType().is(Tags.EntityTypes.BOSSES)||m.isOnFire()) {
+                if (m.getType().is(Tags.EntityTypes.BOSSES)||m.isOnFire()) {
 
                     damage = getDamageAfterArmorAbsorb(m, ds, damage);
                     damage = getDamageAfterMagicAbsorb(m, ds, damage);
-
-                    float f1 = Math.max(damage - m.getAbsorptionAmount(), 0.0F);
-                    m.setAbsorptionAmount(m.getAbsorptionAmount() - (damage - f1));
-                    float f = damage - f1;
-                    if (f > 0.0F && f < 3.4028235E37F) {
-                        Entity entity = ds.getEntity();
-                        if (entity instanceof ServerPlayer serverplayer) {
-                            serverplayer.awardStat(Stats.DAMAGE_DEALT_ABSORBED, Math.round(f * 10.0F));
-                        }
-                    }
 
                     //挖掘疲劳加伤
                     if (damage>=2&&m.hasEffect(MobEffects.DIG_SLOWDOWN)){
@@ -186,6 +314,36 @@ public class EventHandler {
                     //凋零伤害下限
                     if (damage>0&&ds.is(DamageTypes.WITHER)){
                         damage = Math.max(damage,1);
+                    }
+
+                    //凋灵BOSS基岩减伤
+                    if (m.getType().equals(EntityType.WITHER)){
+                        boolean inBedrock = false;
+                        BlockPos baseBlockPos = m.blockPosition();
+                        BlockPos[] blockPosList = new BlockPos[]{
+                                baseBlockPos,baseBlockPos.east(),baseBlockPos.west(),baseBlockPos.south(),baseBlockPos.north(),
+                                baseBlockPos.above(),baseBlockPos.above().east(),baseBlockPos.above().west(),baseBlockPos.above().south(),baseBlockPos.above().north(),
+                                baseBlockPos.above(2),baseBlockPos.above(2).east(),baseBlockPos.above(2).west(),baseBlockPos.above(2).south(),baseBlockPos.above(2).north()
+                        };
+                        for(BlockPos blockPos : blockPosList){
+                            if(m.getCommandSenderWorld().getBlockState(blockPos).is(Blocks.BEDROCK)){
+                                inBedrock = true;
+                                break;
+                            }
+                        }
+                        if(inBedrock){
+                            damage *= 0.2f;
+                        }
+                    }
+
+                    float f1 = Math.max(damage - m.getAbsorptionAmount(), 0.0F);
+                    m.setAbsorptionAmount(m.getAbsorptionAmount() - (damage - f1));
+                    float f = damage - f1;
+                    if (f > 0.0F && f < 3.4028235E37F) {
+                        Entity entity = ds.getEntity();
+                        if (entity instanceof ServerPlayer serverplayer) {
+                            serverplayer.awardStat(Stats.DAMAGE_DEALT_ABSORBED, Math.round(f * 10.0F));
+                        }
                     }
 
                     f1 = ForgeHooks.onLivingDamage(m, ds, f1);
@@ -263,8 +421,6 @@ public class EventHandler {
 
 
     }*/
-
-
 
 
 
@@ -501,10 +657,6 @@ public class EventHandler {
                     spawnMob("evoker",0,0,e.getLevel().getLevel(),e.getEntity().blockPosition());
                 }
                 e.setSpawnCancelled(true);
-            }
-            else if(e.getEntity().getType().equals(EntityType.WITHER)){
-                Objects.requireNonNull(e.getEntity().getAttribute(Attributes.MAX_HEALTH)).setBaseValue(3000);
-                e.getEntity().setHealth(3000);
             }
             else if(e.getEntity().getType().equals(EntityType.ENDER_DRAGON)){
                 Objects.requireNonNull(e.getEntity().getAttribute(Attributes.MAX_HEALTH)).setBaseValue(15000);
@@ -1216,6 +1368,7 @@ public class EventHandler {
                 Vindicator m = new Vindicator(EntityType.VINDICATOR, level);
                 Objects.requireNonNull(m.getAttribute(Attributes.MAX_HEALTH)).setBaseValue(50);
                 Objects.requireNonNull(m.getAttribute(Attributes.ARMOR)).setBaseValue(8);
+                m.setItemSlot(EquipmentSlot.MAINHAND,new ItemStack(Items.IRON_AXE));
                 m.moveTo((double)blockPos.getX() + 0.5D, (double)blockPos.getY(), (double)blockPos.getZ() + 0.5D, 0.0F, 0.0F);
                 level.addFreshEntity(m);
             }
@@ -1225,6 +1378,7 @@ public class EventHandler {
                 Pillager m = new Pillager(EntityType.PILLAGER, level);
                 Objects.requireNonNull(m.getAttribute(Attributes.MAX_HEALTH)).setBaseValue(50);
                 Objects.requireNonNull(m.getAttribute(Attributes.ARMOR)).setBaseValue(4);
+                m.setItemSlot(EquipmentSlot.MAINHAND,new ItemStack(Items.CROSSBOW));
                 m.moveTo((double)blockPos.getX() + 0.5D, (double)blockPos.getY(), (double)blockPos.getZ() + 0.5D, 0.0F, 0.0F);
                 level.addFreshEntity(m);
             }
@@ -1234,6 +1388,7 @@ public class EventHandler {
                 Illusioner m = new Illusioner(EntityType.ILLUSIONER, level);
                 Objects.requireNonNull(m.getAttribute(Attributes.MAX_HEALTH)).setBaseValue(70);
                 Objects.requireNonNull(m.getAttribute(Attributes.ARMOR)).setBaseValue(4);
+                m.setItemSlot(EquipmentSlot.MAINHAND,new ItemStack(Items.BOW));
                 m.moveTo((double)blockPos.getX() + 0.5D, (double)blockPos.getY(), (double)blockPos.getZ() + 0.5D, 0.0F, 0.0F);
                 level.addFreshEntity(m);
             }
@@ -1272,6 +1427,7 @@ public class EventHandler {
                 Piglin m = new Piglin(EntityType.PIGLIN, level);
                 Objects.requireNonNull(m.getAttribute(Attributes.MAX_HEALTH)).setBaseValue(50);
                 Objects.requireNonNull(m.getAttribute(Attributes.ARMOR)).setBaseValue(8);
+                m.setItemSlot(EquipmentSlot.MAINHAND,new ItemStack(Items.CROSSBOW));
                 m.moveTo((double)blockPos.getX() + 0.5D, (double)blockPos.getY(), (double)blockPos.getZ() + 0.5D, 0.0F, 0.0F);
                 level.addFreshEntity(m);
             }
@@ -1300,6 +1456,7 @@ public class EventHandler {
                 PiglinBrute m = new PiglinBrute(EntityType.PIGLIN_BRUTE, level);
                 Objects.requireNonNull(m.getAttribute(Attributes.MAX_HEALTH)).setBaseValue(120);
                 Objects.requireNonNull(m.getAttribute(Attributes.ARMOR)).setBaseValue(14);
+                m.setItemSlot(EquipmentSlot.MAINHAND,new ItemStack(Items.GOLDEN_AXE));
                 m.moveTo((double)blockPos.getX() + 0.5D, (double)blockPos.getY(), (double)blockPos.getZ() + 0.5D, 0.0F, 0.0F);
                 level.addFreshEntity(m);
             }
