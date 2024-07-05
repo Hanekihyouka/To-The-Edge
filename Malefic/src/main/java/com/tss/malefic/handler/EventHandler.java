@@ -3,23 +3,18 @@ package com.tss.malefic.handler;
 import com.mojang.logging.LogUtils;
 import com.tss.malefic.Config;
 import com.tss.malefic.Malefic;
-import com.tss.malefic.content.mobeffects.Sticky;
-import com.tss.malefic.content.mobeffects.Webbed;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
-import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.stats.Stats;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.damagesource.CombatRules;
 import net.minecraft.world.damagesource.DamageSource;
-import net.minecraft.world.damagesource.DamageType;
 import net.minecraft.world.damagesource.DamageTypes;
-import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.*;
@@ -31,35 +26,35 @@ import net.minecraft.world.entity.monster.hoglin.Hoglin;
 import net.minecraft.world.entity.monster.piglin.Piglin;
 import net.minecraft.world.entity.monster.piglin.PiglinBrute;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.inventory.SmithingMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
-import net.minecraft.world.level.dimension.LevelStem;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gameevent.GameEvent;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.common.Tags;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingEvent;
 import net.minecraftforge.event.entity.living.MobSpawnEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import org.jline.utils.Log;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class EventHandler {
     /*@SubscribeEvent
@@ -102,8 +97,8 @@ public class EventHandler {
 
     @SubscribeEvent
     public void entityTick(LivingEvent.LivingTickEvent e){
+        LivingEntity m = e.getEntity();
         if(customTick==0 && !e.getEntity().getCommandSenderWorld().isClientSide()) {
-            LivingEntity m = e.getEntity();
             if(m.hasEffect(MobEffects.NIGHT_VISION)){
                 m.removeEffect(MobEffects.DARKNESS);
                 m.removeEffect(MobEffects.CONFUSION);
@@ -137,7 +132,93 @@ public class EventHandler {
                 }
             }
         }
+
+
+        if(m.getType().equals(EntityType.WITHER)){
+            if(!m.getTags().stream().toList().isEmpty()){
+                Player p = m.getCommandSenderWorld().getPlayerByUUID(UUID.fromString(m.getTags().stream().toList().get(0)));
+                if(p!=null) {
+                    if (!m.getCommandSenderWorld().getScoreboard().hasObjective("malefic_withermark")) {
+                        m.getCommandSenderWorld().getScoreboard().addObjective("malefic_withermark", ObjectiveCriteria.DUMMY, Component.literal("WitherMark"), ObjectiveCriteria.RenderType.INTEGER);
+                    }
+                    if (!m.getCommandSenderWorld().getScoreboard().hasObjective("malefic_withermarkLevel")) {
+                        m.getCommandSenderWorld().getScoreboard().addObjective("malefic_withermarkLevel", ObjectiveCriteria.DUMMY, Component.literal("WitherMarkLevel"), ObjectiveCriteria.RenderType.INTEGER);
+                    }
+                    Objective objectiveMarkTick = m.getCommandSenderWorld().getScoreboard().getOrCreateObjective("malefic_withermark");
+                    Objective objectiveMarkLevel = m.getCommandSenderWorld().getScoreboard().getOrCreateObjective("malefic_withermarkLevel");
+
+
+                    m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkTick).add(1);
+                    int markTick = m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkTick).getScore();
+                    int markLevel = Math.max(m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkLevel).getScore(),2)-2;
+                    if(markTick > 120){
+                        m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkTick).setScore(0);
+                        m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkLevel).add(1);
+                        if(markLevel>0) {
+                            float damage = getDamageAfterMagicAbsorb(p,m.damageSources().mobAttack(m),markLevel);
+                            p.getCombatTracker().recordDamage(m.damageSources().wither(), damage);
+                            p.setHealth(p.getHealth() - damage);
+                            p.gameEvent(GameEvent.ENTITY_DAMAGE);
+                            p.animateHurt(0);
+                            p.getCommandSenderWorld().playSound(null, p.blockPosition(), SoundEvents.PLAYER_HURT, SoundSource.PLAYERS);
+                            p.getCommandSenderWorld().playSound(null, m.blockPosition(), SoundEvents.WITHER_AMBIENT, SoundSource.PLAYERS);
+                            p.addEffect(new MobEffectInstance(MobEffects.WITHER, 20, 0));
+                        }
+                    }
+                    if(p.getHealth()<=0||!p.isAlive()){
+                        p.die(p.damageSources().wither());
+                        m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkTick).setScore(0);
+                        m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkLevel).setScore(0);
+                        discardWither(m);
+                    }
+                } else {
+                    discardWither(m);
+
+                }
+            }
+        }
+
     }
+    @SubscribeEvent
+    public void onWitherSpawn(EntityJoinLevelEvent e){
+        if(!e.getLevel().isClientSide()&&e.getEntity().getType().equals(EntityType.WITHER)){
+            WitherBoss m = (WitherBoss) e.getEntity();
+            Objects.requireNonNull(m.getAttribute(Attributes.MAX_HEALTH)).setBaseValue(3000);
+            m.setHealth(3000);
+            // Mark player
+            Player p = m.getCommandSenderWorld().getNearestPlayer(m,64);
+            if(p!=null){
+                m.addTag(p.getStringUUID());
+                p.getCombatTracker().recordDamage(m.damageSources().wither(), m.getHealth()-2);
+                p.setHealth(1);
+                p.gameEvent(GameEvent.ENTITY_DAMAGE);
+                p.animateHurt(0);
+                p.getCommandSenderWorld().playSound(null,m.blockPosition(),SoundEvents.PLAYER_HURT, SoundSource.PLAYERS);
+                p.getCommandSenderWorld().playSound(null,m.blockPosition(),SoundEvents.WITHER_AMBIENT, SoundSource.PLAYERS);
+                p.addEffect(new MobEffectInstance(MobEffects.WITHER,20, 0));
+
+                Objective objectiveMarkTick = m.getCommandSenderWorld().getScoreboard().getOrCreateObjective("malefic_withermark");
+                Objective objectiveMarkLevel = m.getCommandSenderWorld().getScoreboard().getOrCreateObjective("malefic_withermarkLevel");
+                m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkTick).setScore(0);
+                m.getCommandSenderWorld().getScoreboard().getOrCreatePlayerScore(p.getName().getString(),objectiveMarkLevel).setScore(0);
+            } else{
+                discardWither(m);
+
+            }
+        }
+    }
+
+    protected void discardWither(LivingEntity m){
+        BlockPos blockPos = m.blockPosition();
+        Level level = m.getCommandSenderWorld();
+        m.remove(Entity.RemovalReason.DISCARDED);
+        level.setBlock(blockPos, Blocks.WITHER_SKELETON_SKULL.defaultBlockState(),0);
+        level.setBlock(blockPos.east(), Blocks.WITHER_SKELETON_SKULL.defaultBlockState(),0);
+        level.setBlock(blockPos.west(), Blocks.WITHER_SKELETON_SKULL.defaultBlockState(),0);
+
+    }
+
+
 
     @SubscribeEvent
     public void entityDamageEvent(LivingDamageEvent e){
@@ -169,6 +250,27 @@ public class EventHandler {
             if (damage > 0 && ds.is(DamageTypes.WITHER)) {
                 damage = Math.max(damage, 1);
             }
+
+            //凋灵BOSS基岩减伤
+            if (m.getType().equals(EntityType.WITHER)){
+                boolean inBedrock = false;
+                BlockPos baseBlockPos = m.blockPosition();
+                BlockPos[] blockPosList = new BlockPos[]{
+                        baseBlockPos,baseBlockPos.east(),baseBlockPos.west(),baseBlockPos.south(),baseBlockPos.north(),
+                        baseBlockPos.above(),baseBlockPos.above().east(),baseBlockPos.above().west(),baseBlockPos.above().south(),baseBlockPos.above().north(),
+                        baseBlockPos.above(2),baseBlockPos.above(2).east(),baseBlockPos.above(2).west(),baseBlockPos.above(2).south(),baseBlockPos.above(2).north()
+                };
+                for(BlockPos blockPos : blockPosList){
+                    if(m.getCommandSenderWorld().getBlockState(blockPos).is(Blocks.BEDROCK)){
+                        inBedrock = true;
+                        break;
+                    }
+                }
+                if(inBedrock){
+                    damage *= 0.2f;
+                }
+            }
+
 
             e.setAmount(damage);
         }
@@ -212,6 +314,26 @@ public class EventHandler {
                     //凋零伤害下限
                     if (damage>0&&ds.is(DamageTypes.WITHER)){
                         damage = Math.max(damage,1);
+                    }
+
+                    //凋灵BOSS基岩减伤
+                    if (m.getType().equals(EntityType.WITHER)){
+                        boolean inBedrock = false;
+                        BlockPos baseBlockPos = m.blockPosition();
+                        BlockPos[] blockPosList = new BlockPos[]{
+                                baseBlockPos,baseBlockPos.east(),baseBlockPos.west(),baseBlockPos.south(),baseBlockPos.north(),
+                                baseBlockPos.above(),baseBlockPos.above().east(),baseBlockPos.above().west(),baseBlockPos.above().south(),baseBlockPos.above().north(),
+                                baseBlockPos.above(2),baseBlockPos.above(2).east(),baseBlockPos.above(2).west(),baseBlockPos.above(2).south(),baseBlockPos.above(2).north()
+                        };
+                        for(BlockPos blockPos : blockPosList){
+                            if(m.getCommandSenderWorld().getBlockState(blockPos).is(Blocks.BEDROCK)){
+                                inBedrock = true;
+                                break;
+                            }
+                        }
+                        if(inBedrock){
+                            damage *= 0.2f;
+                        }
                     }
 
                     float f1 = Math.max(damage - m.getAbsorptionAmount(), 0.0F);
@@ -535,35 +657,6 @@ public class EventHandler {
                     spawnMob("evoker",0,0,e.getLevel().getLevel(),e.getEntity().blockPosition());
                 }
                 e.setSpawnCancelled(true);
-            }
-            else if(e.getEntity().getType().equals(EntityType.WITHER)){
-                WitherBoss m = (WitherBoss) e.getEntity();
-                Objects.requireNonNull(e.getEntity().getAttribute(Attributes.MAX_HEALTH)).setBaseValue(3000);
-                m.setHealth(3000);
-                LogUtils.getLogger().info("WITHERSPAWN!!!!");
-                // Mark player
-                Player p = m.getCommandSenderWorld().getNearestPlayer(m,64);
-                if(p!=null){
-                    p.addTag(p.getStringUUID());
-                    p.getCombatTracker().recordDamage(m.damageSources().wither(), m.getHealth()-2);
-                    p.setHealth(2);
-                    p.gameEvent(GameEvent.ENTITY_DAMAGE);
-                    p.animateHurt(0);
-                    p.getCommandSenderWorld().playSound(null,m.blockPosition(),SoundEvents.WITHER_AMBIENT, SoundSource.PLAYERS );
-                    p.addEffect(new MobEffectInstance(MobEffects.WITHER,20, 0));
-
-                    m.getCommandSenderWorld().getPlayerByUUID(UUID.fromString(m.getTags().stream().toList().get(0)));
-
-                } else{
-                    LogUtils.getLogger().info(e.getX()+":"+e.getZ());
-
-                }
-
-
-
-
-
-
             }
             else if(e.getEntity().getType().equals(EntityType.ENDER_DRAGON)){
                 Objects.requireNonNull(e.getEntity().getAttribute(Attributes.MAX_HEALTH)).setBaseValue(15000);
